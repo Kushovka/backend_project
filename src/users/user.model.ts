@@ -1,5 +1,12 @@
-import { Table, Column, Model, DataType, HasMany, BeforeCreate } from 'sequelize-typescript';
-import { Order } from '../../orders/models/order.model';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  HasMany,
+  BeforeCreate,
+} from 'sequelize-typescript';
+import { Order } from '../orders/order.model';
 import * as bcrypt from 'bcrypt';
 
 @Table({ tableName: 'users' })
@@ -63,5 +70,11 @@ export class User extends Model<User> {
       instance.password = await bcrypt.hash(instance.password, 10);
     }
   }
-}
 
+
+  toJSON() {
+    const values = { ...this.get() };
+    delete values.password;
+    return values;
+  }
+}

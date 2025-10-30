@@ -1,8 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Sequelize } from 'sequelize-typescript';
-import { Order, OrderStatus } from './models/order.model';
-import { OrderItem } from './models/order-item.model';
+import { Order, OrderStatus } from './order.model';
+import { OrderItem } from './order-item.model';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { ProductsService } from '../products/products.service';
@@ -17,100 +20,141 @@ export class OrdersService {
     private productsService: ProductsService,
   ) {}
 
+  // Создание заказа
   async create(userId: number, createOrderDto: CreateOrderDto): Promise<Order> {
     if (!createOrderDto.items || createOrderDto.items.length === 0) {
       throw new BadRequestException('Order must have at least one item');
     }
 
-    let total = 0;
-    const orderItems = [];
+    const transaction = await this.orderModel.sequelize.transaction();
 
-    for (const item of createOrderDto.items) {
-      const product = await this.productsService.findOne(item.productId);
-      
-      if (product.stock < item.quantity) {
-        throw new BadRequestException(`Insufficient stock for product ${product.name}`);
+    try {
+      let total = 0;
+
+      const order = await this.orderModel.create(
+        {
+          userId,
+          shippingAddress: createOrderDto.shippingAddress || '',
+          status: OrderStatus.PENDING,
+        },
+        { transaction },
+      );
+
+      for (const item of createOrderDto.items) {
+        const product = await this.productsService.findOne(item.productId);
+
+        if (product.stock < item.quantity) {
+          throw new BadRequestException(
+            `Insufficient stock for product ${product.name}`,
+          );
+        }
+
+        total += Number(product.price) * item.quantity;
+
+        await this.orderItemModel.create(
+          {
+            orderId: order.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            price: Number(product.price),
+          },
+          { transaction },
+        );
+
+        await this.productsService.decreaseStock(item.productId, item.quantity, transaction);
       }
 
-      const itemTotal = product.price * item.quantity;
-      total += itemTotal;
+      await order.update({ total }, { transaction });
 
-      const orderItem = await this.orderItemModel.create({
-        productId: item.productId,
-        quantity: item.quantity,
-        price: product.price,
-      });
+      await transaction.commit();
 
-      orderItems.push(orderItem);
-
-      await this.productsService.decreaseStock(item.productId, item.quantity);
+      return this.findOne(order.id);
+    } catch (error) {
+      await transaction.rollback();
+      console.error(error);
+      throw error;
     }
-
-    const order = await this.orderModel.create({
-      userId,
-      total,
-      shippingAddress: createOrderDto.shippingAddress || '',
-      status: OrderStatus.PENDING,
-    });
-
-    await Promise.all(orderItems.map(item => item.update({ orderId: order.id })));
-
-    return this.findOne(order.id);
   }
 
-  async findAll(userId?: number): Promise<Order[]> {
-    const where = userId ? { userId } : {};
-    
+  // Получить все заказы
+  async findAll(): Promise<Order[]> {
     return this.orderModel.findAll({
-      where,
       include: [
-        {
-          association: 'user',
-          attributes: { exclude: ['password'] },
-        },
-        {
-          association: 'items',
-        },
+        { association: 'user', attributes: { exclude: ['password'] } },
+        { association: 'items' },
       ],
       order: [['createdAt', 'DESC']],
     });
   }
 
+  // Получить один заказ
   async findOne(id: number): Promise<Order> {
     const order = await this.orderModel.findByPk(id, {
       include: [
-        {
-          association: 'user',
-          attributes: { exclude: ['password'] },
-        },
-        {
-          association: 'items',
-        },
+        { association: 'user', attributes: { exclude: ['password'] } },
+        { association: 'items' },
       ],
     });
 
-    if (!order) {
-      throw new NotFoundException(`Order with ID ${id} not found`);
-    }
+    if (!order) throw new NotFoundException(`Order with ID ${id} not found`);
 
     return order;
   }
 
+  // Обновление заказа
   async update(id: number, updateOrderDto: UpdateOrderDto): Promise<Order> {
     const order = await this.findOne(id);
+    const { items, status, shippingAddress } = updateOrderDto;
 
-    await order.update(updateOrderDto);
+    // Обновляем только поля заказа
+    const fieldsToUpdate: Partial<Order> = {};
+    if (status) fieldsToUpdate.status = status;
+    if (shippingAddress) fieldsToUpdate.shippingAddress = shippingAddress;
+
+    if (Object.keys(fieldsToUpdate).length) {
+      await order.update(fieldsToUpdate);
+    }
+
+    // Обновляем позиции через транзакцию
+    if (items && items.length) {
+      await this.orderModel.sequelize.transaction(async (transaction) => {
+        await this.orderItemModel.destroy({ where: { orderId: id }, transaction });
+
+        for (const item of items) {
+          const product = await this.productsService.findOne(item.productId);
+
+          if (product.stock < item.quantity) {
+            throw new BadRequestException(
+              `Insufficient stock for product ${product.name}`,
+            );
+          }
+
+          await this.orderItemModel.create(
+            {
+              orderId: order.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              price: Number(product.price),
+            },
+            { transaction },
+          );
+
+          await this.productsService.decreaseStock(item.productId, item.quantity, transaction);
+        }
+      });
+    }
 
     return this.findOne(id);
   }
 
+  // Удаление заказа
   async remove(id: number): Promise<void> {
     const order = await this.findOne(id);
-    
     await order.destroy();
   }
 
-  async cancelOrder(id: number, userId: number): Promise<Order> {
+  // Отмена заказа
+  async cancelOrder(id: number): Promise<Order> {
     const order = await this.findOne(id);
 
     if (order.status === OrderStatus.DELIVERED) {
@@ -123,4 +167,3 @@ export class OrdersService {
     return this.findOne(id);
   }
 }
-

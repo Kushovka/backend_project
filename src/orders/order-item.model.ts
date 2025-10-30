@@ -1,6 +1,13 @@
-import { Table, Column, Model, DataType, BelongsTo, ForeignKey } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  BelongsTo,
+  ForeignKey,
+} from 'sequelize-typescript';
 import { Order } from './order.model';
-import { Product } from '../../products/models/product.model';
+import { Product } from '../products/product.model';
 
 @Table({ tableName: 'order_items' })
 export class OrderItem extends Model<OrderItem> {
@@ -55,4 +62,3 @@ export class OrderItem extends Model<OrderItem> {
   })
   updatedAt: Date;
 }
-

@@ -1,71 +1,51 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Product } from './models/product.model';
+import { Product } from './product.model';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { Sequelize } from 'sequelize-typescript';
+import { Op, Transaction } from 'sequelize';
 
 @Injectable()
 export class ProductsService {
-  constructor(
-    @InjectModel(Product)
-    private productModel: typeof Product,
-  ) {}
+  constructor(@InjectModel(Product) private productModel: typeof Product) {}
 
-  async create(createProductDto: CreateProductDto): Promise<Product> {
-    return this.productModel.create(createProductDto);
+  async create(dto: CreateProductDto): Promise<Product> {
+    return this.productModel.create(dto);
   }
 
-  async findAll(): Promise<Product[]> {
-    return this.productModel.findAll({
-      order: [['createdAt', 'DESC']],
+  async findAll(page = 1, limit = 10, search?: string) {
+    const offset = (page - 1) * limit;
+    const where = search ? { name: { [Op.iLike]: `%${search}%` } } : {};
+    const { rows, count } = await this.productModel.findAndCountAll({
+      where,
+      offset,
+      limit,
     });
+    return { data: rows, total: count, page, limit };
   }
 
   async findOne(id: number): Promise<Product> {
     const product = await this.productModel.findByPk(id);
-
-    if (!product) {
-      throw new NotFoundException(`Product with ID ${id} not found`);
-    }
-
+    if (!product) throw new NotFoundException(`Product ${id} not found`);
     return product;
   }
 
-  async update(id: number, updateProductDto: UpdateProductDto): Promise<Product> {
+  async update(id: number, dto: UpdateProductDto): Promise<Product> {
     const product = await this.findOne(id);
-
-    await product.update(updateProductDto);
-
+    await product.update(dto);
     return this.findOne(id);
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number) {
     const product = await this.findOne(id);
     await product.destroy();
   }
 
-  async decreaseStock(productId: number, quantity: number): Promise<void> {
-    const product = await this.findOne(productId);
-
-    if (product.stock < quantity) {
-      throw new BadRequestException('Insufficient stock');
-    }
-
+  async decreaseStock(id: number, quantity: number, transaction?: Transaction) {
+    const product = await this.findOne(id);
+    if (product.stock < quantity)
+      throw new Error(`Insufficient stock for ${product.name}`);
     product.stock -= quantity;
-    await product.save();
-  }
-
-  async increaseStock(productId: number, quantity: number): Promise<void> {
-    const product = await this.findOne(productId);
-    product.stock += quantity;
-    await product.save();
-  }
-
-  async searchByName(name: string): Promise<Product[]> {
-    return this.productModel.findAll({
-      where: Sequelize.literal(`name ILIKE '%${name}%'`),
-    } as any);
+    await product.save({ transaction });
   }
 }
-
