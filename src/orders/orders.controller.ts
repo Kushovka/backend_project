@@ -13,7 +13,7 @@ export class OrdersController {
   @Post()
   @ApiOperation({ summary: 'Create order' })
   @ApiResponse({ status: 201, description: 'Order created', type: OrderDto })
-  create(@Body() dto: CreateOrderDto) {
+  create(@Body() dto: CreateOrderDto ) {
     const userId = 3; // пока захардкожено
     return this.ordersService.create(userId, dto);
   }

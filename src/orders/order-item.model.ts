@@ -14,7 +14,7 @@ export class OrderItem extends Model<OrderItem> {
   @Column({
     type: DataType.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
+    autoIncrement: true, 
   })
   id: number;
 
