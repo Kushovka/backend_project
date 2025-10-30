@@ -15,6 +15,6 @@
 
 ## ⚡ Установка и запуск
 ```bash
-git clone <REPO_URL>
-cd <PROJECT_FOLDER>
+git clone https://github.com/Kushovka/backend_project.git
+cd MG
 npm install
